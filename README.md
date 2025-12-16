@@ -7,7 +7,7 @@ This is a single-file HTML simulation designed to demonstrate the fundamentals o
 This simulation is entirely self-contained within one HTML file. It requires **no server setup, no external libraries, and no special software.**
 
 * **To Run:** You only need a standard **Web Browser** (like Chrome, Firefox, or Edge).
-* **To Edit:** Any plain **Text Editor** (like Notepad or TextEdit) is sufficient to view and modify the code.
+* **To Edit:** Any plain **Text Editor** (like Notepad) is sufficient to view and modify the code.
 
 ### How to Use
 
