@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Servo Pendulum Control Simulation - PID Breakdown</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        h2 {
+            margin-bottom: 10px;
+        }
+
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        canvas {
+            border: 2px solid #e1e4e8;
+            border-radius: 8px;
+            background-color: #fafafa;
+            cursor: crosshair;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            min-width: 250px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        
+        input[type="number"], input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            margin-top: 2px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .pid-value-label {
+            font-size: 0.8em;
+            color: #495057;
+            margin-bottom: 2px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        button {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 5px;
+        }
+
+        button#startBtn {
+            background-color: #28a745;
+            color: white;
+        }
+        button#startBtn:hover { background-color: #218838; }
+        button#startBtn.active { background-color: #dc3545; }
+
+        button#resetBtn {
+            background-color: #007bff;
+            color: white;
+        }
+        button#resetBtn:hover { background-color: #0056b3; }
+
+        .status {
+            margin-top: 5px;
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .pid-breakdown .status {
+            margin-top: 0;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .pid-breakdown .status:last-child {
+            font-weight: bold;
+            color: #dc3545; /* Highlight the final Actuator Signal */
+            border-top: 1px dashed #ccc;
+            padding-top: 5px;
+        }
+        
+    </style>
+</head>
+<body>
+
+    <h2>Servo Pendulum Control Simulation</h2>
+    <p>Target: 0° (Vertical Up)</p>
+    
+    <div class="container">
+        <div>
+            <canvas id="simCanvas" width="500" height="400"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Motor Status</label>
+                <button id="startBtn" onclick="toggleMotor()">Start Motor</button>
+                <div id="motorStatus" class="status">Motor: OFF</div>
+            </div>
+
+            <div class="control-group">
+                <label for="initAngle">Initial Angle (Degrees)</label>
+                <div style="font-size:0.8em; color:#666; margin-bottom:5px;">0° is Up, 180° is Down</div>
+                <input type="number" id="initAngle" value="170" min="-180" max="180">
+                <button id="resetBtn" onclick="resetSimulation()">Set & Reset</button>
+            </div>
+
+            <div class="control-group">
+                <label>PID Tuning $K_p$, $K_i$, $K_d$</label>
+                
+                <div class="pid-value-label"><span>Proportional ($K_p$)</span><span id="labelKp">2000</span></div>
+                <div class="slider-container">
+                    <input type="range" id="sliderKp" min="0" max="5000" step="50" value="2000" oninput="updatePid('Kp')">
+                </div>
+
+                <div class="pid-value-label"><span>Integral ($K_i$)</span><span id="labelKi">10</span></div>
+                <div class="slider-container">
+                    <input type="range" id="sliderKi" min="0" max="100" step="1" value="10" oninput="updatePid('Ki')">
+                </div>
+
+                <div class="pid-value-label"><span>Derivative ($K_d$)</span><span id="labelKd">600</span></div>
+                <div class="slider-container">
+                    <input type="range" id="sliderKd" min="0" max="1500" step="10" value="600" oninput="updatePid('Kd')">
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>System Live Data</label>
+                <div class="status">Current Angle: <span id="dispAngle">0.0</span>°</div>
+
+                <label style="margin-top:10px;">Actuator Signal (PID Components)</label>
+                <div class="pid-breakdown">
+                    <div class="status">P-Term: <span id="dispP">0.0</span></div>
+                    <div class="status">I-Term: <span id="dispI">0.0</span></div>
+                    <div class="status">D-Term: <span id="dispD">0.0</span></div>
+                    <div class="status">Motor Torque: <span id="dispTorque">0.0</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        // Physics Constants
+        const L = 150;        // Length of pendulum (pixels)
+        const m = 1.0;        // Mass (arbitrary units)
+        const g = 9.81;       // Gravity
+        const dt = 0.016;     // Time step (approx 60fps)
+        const damping = 0.99; // Damping (air resistance/friction)
+        const maxTorque = 4000; // Motor limit
+
+        // PID Control Constants (Dynamic)
+        let Kp = 2000; 
+        let Kd = 600;  
+        let Ki = 10;   
+
+        // State Variables
+        let angle = Math.PI; // Start pointing down (PI radians)
+        let velocity = 0;
+        let acceleration = 0;
+        let motorOn = false;
+        
+        // PID State
+        let integralError = 0;
+        let lastError = 0;
+
+        // UI Elements
+        const startBtn = document.getElementById('startBtn');
+        const statusText = document.getElementById('motorStatus');
+        const angleDisplay = document.getElementById('dispAngle');
+        const torqueDisplay = document.getElementById('dispTorque');
+        const initAngleInput = document.getElementById('initAngle');
+        
+        // PID Component Displays
+        const dispP = document.getElementById('dispP');
+        const dispI = document.getElementById('dispI');
+        const dispD = document.getElementById('dispD');
+        
+        // PID Sliders and Labels
+        const sliderKp = document.getElementById('sliderKp');
+        const sliderKi = document.getElementById('sliderKi');
+        const sliderKd = document.getElementById('sliderKd');
+        const labelKp = document.getElementById('labelKp');
+        const labelKi = document.getElementById('labelKi');
+        const labelKd = document.getElementById('labelKd');
+
+        // Function to update PID values from sliders
+        function updatePid(component) {
+            if (component === 'Kp') {
+                Kp = parseFloat(sliderKp.value);
+                labelKp.innerText = Kp;
+            } else if (component === 'Ki') {
+                Ki = parseFloat(sliderKi.value);
+                labelKi.innerText = Ki;
+            } else if (component === 'Kd') {
+                Kd = parseFloat(sliderKd.value);
+                labelKd.innerText = Kd;
+            }
+            integralError = 0; 
+        }
+
+        // --- Physics Engine ---
+        function updatePhysics() {
+            // 1. Calculate Gravity Torque
+            let gravityTorque = m * g * Math.sin(angle) * 15; 
+
+            // 2. Control System (Actuator Signal Calculation)
+            let motorTorque = 0;
+            let P_term = 0;
+            let I_term = 0;
+            let D_term = 0;
+
+
+            if (motorOn) {
+                // Determine error (Shortest path to 0)
+                let currentPos = angle % (2 * Math.PI);
+                if (currentPos > Math.PI) currentPos -= 2 * Math.PI;
+                if (currentPos < -Math.PI) currentPos += 2 * Math.PI;
+
+                const target = 0;
+                let error = target - currentPos;
+
+                // PID Calculations
+                P_term = Kp * error;
+                
+                // Derivative
+                D_term = Kd * (error - lastError) / dt;
+                
+                // Integral with anti-windup (limit the accumulator)
+                integralError += error * dt;
+                if(integralError > 50) integralError = 50; 
+                if(integralError < -50) integralError = -50;
+                I_term = Ki * integralError;
+
+                // The Actuator Signal (Motor Torque) is the sum of PID components
+                motorTorque = P_term + I_term + D_term;
+                
+                // Torque Saturation (Motor limit)
+                if (motorTorque > maxTorque) motorTorque = maxTorque;
+                if (motorTorque < -maxTorque) motorTorque = -maxTorque;
+
+                lastError = error;
+            } else {
+                // Reset PID memory when motor is off
+                integralError = 0;
+                lastError = 0;
+            }
+
+            // 3. Apply Forces
+            let totalTorque = gravityTorque + motorTorque;
+
+            acceleration = totalTorque / (m * L); 
+
+            // 4. Update State (Euler Integration)
+            velocity += acceleration * dt;
+            velocity *= damping; // Apply friction
+            angle += velocity * dt;
+
+            // Update UI Data
+            torqueDisplay.innerText = motorTorque.toFixed(1);
+            dispP.innerText = P_term.toFixed(1);
+            dispI.innerText = I_term.toFixed(1);
+            dispD.innerText = D_term.toFixed(1);
+
+            let dispDeg = (angle * 180 / Math.PI) % 360;
+            if(dispDeg > 180) dispDeg -= 360;
+            if(dispDeg < -180) dispDeg += 360;
+            angleDisplay.innerText = (-dispDeg).toFixed(1); 
+        }
+
+        // --- Rendering (No changes needed here from previous) ---
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw Target Line (Vertical Up)
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.lineTo(centerX, centerY - L - 20);
+            ctx.strokeStyle = "rgba(255, 0, 0, 0.3)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Coordinates of pendulum mass
+            const x = centerX + L * Math.sin(angle);
+            const y = centerY - L * Math.cos(angle);
+
+            // Draw Motor/Base
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 15, 0, 2 * Math.PI);
+            ctx.fillStyle = "#555";
+            ctx.fill();
+
+            // Draw Rod
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = "#333";
+            ctx.lineWidth = 6;
+            ctx.stroke();
+
+            // Draw Mass
+            ctx.beginPath();
+            ctx.arc(x, y, 20, 0, 2 * Math.PI);
+            ctx.fillStyle = motorOn ? "#28a745" : "#007bff"; // Green if active, Blue if free
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw Motor Torque Visualizer (Arc)
+            if (Math.abs(parseFloat(torqueDisplay.innerText)) > 10) {
+                const torqueVal = parseFloat(torqueDisplay.innerText);
+                ctx.beginPath();
+                const radius = 40;
+                const startAngle = -Math.PI / 2;
+                const endAngle = startAngle + (torqueVal / 2000); 
+                
+                ctx.arc(centerX, centerY, radius, startAngle, endAngle, torqueVal < 0);
+                ctx.strokeStyle = "orange";
+                ctx.lineWidth = 4;
+                ctx.stroke();
+            }
+        }
+
+        // --- Interaction Logic ---
+        function loop() {
+            updatePhysics();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function toggleMotor() {
+            motorOn = !motorOn;
+            if (motorOn) {
+                startBtn.innerText = "Stop Motor";
+                startBtn.classList.add("active");
+                statusText.innerText = "Motor: ON (PID Control)";
+            } else {
+                startBtn.innerText = "Start Motor";
+                startBtn.classList.remove("active");
+                statusText.innerText = "Motor: OFF (Free Swing)";
+                // Zero out the Actuator Signal breakdown when motor is off
+                dispP.innerText = "0.0";
+                dispI.innerText = "0.0";
+                dispD.innerText = "0.0";
+                torqueDisplay.innerText = "0.0";
+            }
+        }
+
+        function resetSimulation() {
+            motorOn = false; 
+            toggleMotor(false); 
+            
+            let deg = parseFloat(initAngleInput.value);
+            angle = -deg * (Math.PI / 180); 
+            
+            velocity = 0;
+            acceleration = 0;
+            integralError = 0;
+            lastError = 0;
+            
+            draw(); 
+        }
+
+        // Initialize PID values and start
+        updatePid('Kp');
+        updatePid('Ki');
+        updatePid('Kd');
+        resetSimulation(); 
+        loop();
+
+    </script>
+</body>
+</html>
